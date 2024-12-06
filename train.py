@@ -255,10 +255,13 @@ def main(args):
               model.eval()
               with torch.no_grad():
                   z = torch.randn(8, 4, latent_size, latent_size, device=device)
-                  y_sample = torch.randint(0, 1, (8,), device=device)
+                  # TODO: replace 1 by nb_classes
+                  y = torch.randint(0, 1, (4,), device=device)
+                  y_null = torch.tensor([1000] * 4, device=device)
+                  y_sample = torch.cat([y, y_null], 0)
                   model_kwargs = dict(y=y_sample, cfg_scale=args.cfg_scale)
                   samples = diffusion.p_sample_loop(
-                      model.module.forward_with_cfg, z.shape, z, clip_denoised=True, model_kwargs=model_kwargs, progress=False, device=device
+                      model.module.forward_with_cfg, z.shape, z, clip_denoised=False, model_kwargs=model_kwargs, progress=False, device=device
                   )
                   samples, _ = samples.chunk(2, dim=0)
                   samples = vae.decode(samples / 0.18215).sample
