@@ -261,7 +261,7 @@ def main(args):
                   y_sample = torch.cat([y, y_null], 0)
                   model_kwargs = dict(y=y_sample, cfg_scale=args.cfg_scale)
                   samples = diffusion.p_sample_loop(
-                      model.module.forward_with_cfg, z.shape, z, clip_denoised=False, model_kwargs=model_kwargs, progress=False, device=device
+                      model.module.forward_with_cfg, z.shape, z, clip_denoised=True, model_kwargs=model_kwargs, progress=False, device=device
                   )
                   samples, _ = samples.chunk(2, dim=0)
                   samples = vae.decode(samples / 0.18215).sample
