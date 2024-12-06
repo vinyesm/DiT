@@ -28,6 +28,7 @@ import logging
 import os
 
 from models import DiT_models
+from download import find_model
 from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
 
@@ -143,6 +144,8 @@ def main(args):
         input_size=latent_size,
         num_classes=args.num_classes
     )
+    state_dict = find_model(f"DiT-XL-2-{args.image_size}x{args.image_size}.pt")
+    model.load_state_dict(state_dict) 
     # Note that parameter initialization is done within the DiT constructor
     ema = deepcopy(model).to(device)  # Create an EMA of the model for use after training
     requires_grad(ema, False)
