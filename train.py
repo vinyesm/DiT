@@ -136,7 +136,6 @@ def main(args):
         os.makedirs(checkpoint_dir, exist_ok=True)
         logger = create_logger(experiment_dir)
         logger.info(f"Experiment directory created at {experiment_dir}")
-        # Only the main process logs to wandb
         wandb.init(
             project="DiT",
             name="fashion",
@@ -151,13 +150,11 @@ def main(args):
         input_size=latent_size,
         num_classes=args.num_classes
     )
-    # state_dict = find_model(f"DiT-XL-2-{args.image_size}x{args.image_size}.pt")
-    # model.load_state_dict(state_dict) 
     # Note that parameter initialization is done within the DiT constructor
     ema = deepcopy(model).to(device)  # Create an EMA of the model for use after training
     requires_grad(ema, False)
     model = DDP(model.to(device), device_ids=[rank])
-    diffusion = create_diffusion(timestep_respacing="")  # default: 1000 steps, linear noise schedule
+    diffusion = create_diffusion(timestep_respacing="", diffusion_steps=args.diffusion_steps)  # default: 1000 steps, linear noise schedule
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
     logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
@@ -208,12 +205,10 @@ def main(args):
         for x, y in loader:
             x = x.to(device)
             y = y.to(device)
-            print(y)
             with torch.no_grad():
                 # Map input images to latent space + normalize latents:
                 x = vae.encode(x).latent_dist.sample().mul_(0.18215)
             t = torch.randint(0, diffusion.num_timesteps, (x.shape[0],), device=device)
-            print(f"noise t {t}")
             model_kwargs = dict(y=y)
             loss_dict = diffusion.training_losses(model, x, t, model_kwargs)
             loss = loss_dict["loss"].mean()
@@ -265,6 +260,7 @@ def main(args):
                   samples = diffusion.p_sample_loop(
                       model.module.forward_with_cfg, z.shape, z, clip_denoised=True, model_kwargs=model_kwargs, progress=False, device=device
                   )
+                  samples, _ = samples.chunk(2, dim=0)
                   samples = vae.decode(samples / 0.18215).sample
                   samples = (samples.clamp(-1, 1) + 1) / 2  # Normalize to [0, 1]
                   wandb.log({"Generated Images": [wandb.Image(img) for img in samples]}, step=train_steps)
@@ -292,6 +288,7 @@ if __name__ == "__main__":
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--ckpt-every", type=int, default=50_000)
+    parser.add_argument("--diffusion-steps", type=int, default=50)
     parser.add_argument("--sample-every", type=int, default=100)
     parser.add_argument("--cfg-scale", type=float, default=4.0, help="Classifier-free guidance scale.")
     args = parser.parse_args()
