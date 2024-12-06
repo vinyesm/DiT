@@ -32,6 +32,8 @@ from download import find_model
 from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
 
+import wandb
+
 
 #################################################################################
 #                             Training Helper Functions                         #
@@ -134,6 +136,11 @@ def main(args):
         os.makedirs(checkpoint_dir, exist_ok=True)
         logger = create_logger(experiment_dir)
         logger.info(f"Experiment directory created at {experiment_dir}")
+        # Only the main process logs to wandb
+        wandb.init(
+            project="DiT",
+            name="fashion",
+        )
     else:
         logger = create_logger(None)
 
@@ -229,6 +236,7 @@ def main(args):
                 dist.all_reduce(avg_loss, op=dist.ReduceOp.SUM)
                 avg_loss = avg_loss.item() / dist.get_world_size()
                 logger.info(f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
+                wandb.log({"Train Loss": avg_loss, "Train Steps/Sec": steps_per_sec}, step=train_steps)
                 # Reset monitoring variables:
                 running_loss = 0
                 log_steps = 0
@@ -247,6 +255,20 @@ def main(args):
                     torch.save(checkpoint, checkpoint_path)
                     logger.info(f"Saved checkpoint to {checkpoint_path}")
                 dist.barrier()
+            
+            if train_steps % args.sample_every == 0:
+              model.eval()
+              with torch.no_grad():
+                  z = torch.randn(8, 4, latent_size, latent_size, device=device)
+                  y_sample = torch.randint(0, 1, (8,), device=device)
+                  model_kwargs = dict(y=y_sample, cfg_scale=args.cfg_scale)
+                  samples = diffusion.p_sample_loop(
+                      model.module.forward_with_cfg, z.shape, z, clip_denoised=True, model_kwargs=model_kwargs, progress=False, device=device
+                  )
+                  samples = vae.decode(samples / 0.18215).sample
+                  samples = (samples.clamp(-1, 1) + 1) / 2  # Normalize to [0, 1]
+                  wandb.log({"Generated Images": [wandb.Image(img) for img in samples]}, step=train_steps)
+              model.train()
 
     model.eval()  # important! This disables randomized embedding dropout
     # do any sampling/FID calculation/etc. with ema (or model) in eval mode ...
@@ -270,5 +292,7 @@ if __name__ == "__main__":
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--ckpt-every", type=int, default=50_000)
+    parser.add_argument("--sample-every", type=int, default=100)
+    parser.add_argument("--cfg-scale", type=float, default=4.0, help="Classifier-free guidance scale.")
     args = parser.parse_args()
     main(args)

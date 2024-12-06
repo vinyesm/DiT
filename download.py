@@ -21,6 +21,7 @@ def find_model(model_name):
     """
     if model_name in pretrained_models:  # Find/download our pre-trained DiT checkpoints
         print(f'{model_name} in pretrained')
+        # return None
         return download_model(model_name)
     else:  # Load a custom DiT checkpoint:
         print(f'{model_name} is local')
