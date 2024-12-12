@@ -26,13 +26,11 @@ from time import time
 import argparse
 import logging
 import os
+import wandb
 
 from models import DiT_models
-from download import find_model
 from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
-
-import wandb
 
 
 #################################################################################
@@ -136,10 +134,11 @@ def main(args):
         os.makedirs(checkpoint_dir, exist_ok=True)
         logger = create_logger(experiment_dir)
         logger.info(f"Experiment directory created at {experiment_dir}")
-        wandb.init(
-            project="DiT",
-            name="fashion",
-        )
+        if args.wandb_logging:
+            wandb.init(
+                project=args.wandb_project,
+                name=args.wandb_name,
+            )
     else:
         logger = create_logger(None)
 
@@ -250,24 +249,39 @@ def main(args):
                     torch.save(checkpoint, checkpoint_path)
                     logger.info(f"Saved checkpoint to {checkpoint_path}")
                 dist.barrier()
-            
+
+            # Sample generated imaged from current model:
             if train_steps % args.sample_every == 0:
-              model.eval()
-              with torch.no_grad():
-                  z = torch.randn(8, 4, latent_size, latent_size, device=device)
-                  # TODO: replace 1 by nb_classes
-                  y = torch.randint(0, 1, (4,), device=device)
-                  y_null = torch.tensor([1000] * 4, device=device)
-                  y_sample = torch.cat([y, y_null], 0)
-                  model_kwargs = dict(y=y_sample, cfg_scale=args.cfg_scale)
-                  samples = diffusion.p_sample_loop(
-                      model.module.forward_with_cfg, z.shape, z, clip_denoised=True, model_kwargs=model_kwargs, progress=False, device=device
-                  )
-                  samples, _ = samples.chunk(2, dim=0)
-                  samples = vae.decode(samples / 0.18215).sample
-                  samples = (samples.clamp(-1, 1) + 1) / 2  # Normalize to [0, 1]
-                  wandb.log({"Generated Images": [wandb.Image(img) for img in samples]}, step=train_steps)
-              model.train()
+                model.eval()
+                with torch.no_grad():
+                    n_samples = 4
+                    z = torch.randn(
+                        n_samples * 2, 4, 
+                        latent_size, latent_size, 
+                        device=device
+                    )
+                    # TODO: replace 1 by nb_classes
+                    y = torch.randint(0, 1, (n_samples,), device=device)
+                    y_null = torch.tensor([1000] * n_samples, device=device)
+                    y_sample = torch.cat([y, y_null], 0)
+                    model_kwargs = dict(y=y_sample, cfg_scale=args.sample_cfg_scale)
+                    samples = diffusion.p_sample_loop(
+                        model.module.forward_with_cfg, 
+                        z.shape, z, 
+                        clip_denoised=True, 
+                        model_kwargs=model_kwargs, 
+                        progress=False, 
+                        device=device
+                    )
+                    samples, _ = samples.chunk(2, dim=0)
+                    samples = vae.decode(samples / 0.18215).sample
+                    samples = (samples.clamp(-1, 1) + 1) / 2  # Normalize to [0, 1]
+                    if args.wandb_logging:
+                        wandb.log(
+                            {"Generated Images": [wandb.Image(img) for img in samples]}, 
+                            step=train_steps
+                        )
+                model.train()
 
     model.eval()  # important! This disables randomized embedding dropout
     # do any sampling/FID calculation/etc. with ema (or model) in eval mode ...
@@ -291,8 +305,11 @@ if __name__ == "__main__":
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--ckpt-every", type=int, default=50_000)
-    parser.add_argument("--diffusion-steps", type=int, default=50)
+    parser.add_argument("--wandb-logging", type=bool, default=False)
+    parser.add_argument("--wandb-project", type=str, default="DiT")
+    parser.add_argument("--wandb-name", type=str, default="fashion-dataset")
     parser.add_argument("--sample-every", type=int, default=100)
-    parser.add_argument("--cfg-scale", type=float, default=4.0, help="Classifier-free guidance scale.")
+    parser.add_argument("--sample-cfg-scale", type=float, default=4.0, help="Classifier-free guidance scale.")
+    parser.add_argument("--diffusion-steps", type=int, default=50)
     args = parser.parse_args()
     main(args)
