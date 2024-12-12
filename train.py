@@ -214,7 +214,7 @@ def main(args):
             opt.zero_grad()
             loss.backward()
             opt.step()
-            update_ema(ema, model.module)
+            update_ema(ema, model.module, decay=args.ema_decay)
 
             # Log loss values:
             running_loss += loss.item()
@@ -310,6 +310,7 @@ if __name__ == "__main__":
     parser.add_argument("--wandb-name", type=str, default="fashion-dataset")
     parser.add_argument("--sample-every", type=int, default=100)
     parser.add_argument("--sample-cfg-scale", type=float, default=4.0, help="Classifier-free guidance scale.")
-    parser.add_argument("--diffusion-steps", type=int, default=50)
+    parser.add_argument("--diffusion-steps", type=int, default=1000) # 100 for small experiments
+    parser.add_argument("--ema-decay", type=float, default=0.9999) # 0.999 for small experiments
     args = parser.parse_args()
     main(args)
